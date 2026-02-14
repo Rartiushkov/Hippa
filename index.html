@@ -76,7 +76,7 @@
 
       // ✅ REPLACE THIS with your real API Gateway base URL (no trailing slash)
       // Example: https://abc123.execute-api.eu-north-1.amazonaws.com
-      const API_BASE = 'https://YOUR_API_GATEWAY_DOMAIN';
+      const API_BASE = 'https://6cxl9xwo00.execute-api.eu-north-1.amazonaws.com';
 
       pill(pillSid, `sid: ${sid ? sid.slice(0,8)+'…' : 'missing'}`, sid ? 'ok' : 'bad');
       pill(pillApi, `api: ${API_BASE}`, API_BASE.includes('YOUR_API_GATEWAY_DOMAIN') ? 'bad' : 'ok');
