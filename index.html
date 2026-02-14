@@ -1,96 +1,248 @@
 <!doctype html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover" />
   <title>HIPAA Sign</title>
-  <script src="https://cdn.hellosign.com/public/js/embedded/v2.1.0/embedded.js"></script>
+
+  <!-- HelloSign / Dropbox Sign Embedded -->
+  <script src="https://cdn.hellosign.com/public/js/embedded/v2.11.1/embedded.development.js"></script>
+
   <style>
-    body { font-family: Arial, sans-serif; margin: 16px; }
-    .box { padding: 12px; border: 1px solid #ddd; border-radius: 10px; margin-bottom: 12px; }
-    #container { width: 100%; height: 85vh; border: 1px solid #eee; border-radius: 10px; overflow: hidden; }
-    code { background: #f6f6f6; padding: 2px 6px; border-radius: 6px; }
-    pre { background: #0b0b0b; color: #d9d9d9; padding: 10px; border-radius: 10px; overflow:auto; }
+    html, body {
+      height: 100%;
+      margin: 0;
+      padding: 0;
+      background: #fff;
+      font-family: Arial, sans-serif;
+    }
+
+    .box {
+      max-width: 820px;
+      margin: 0 auto;
+      padding: 16px;
+    }
+
+    .muted { color: #666; }
+
+    .card {
+      border: 1px solid #e6e6e6;
+      border-radius: 12px;
+      padding: 12px;
+      margin: 10px 0;
+      background: #fff;
+      word-break: break-word;
+      white-space: pre-wrap;
+    }
+
+    .title {
+      font-weight: 700;
+      margin-bottom: 6px;
+    }
+
+    #status { margin-top: 10px; }
+
+    /* Dedicated container for embedded iframe */
+    #embed {
+      margin-top: 14px;
+      width: 100%;
+      min-height: 900px;        /* key: give space so Continue isn't hidden */
+      height: 900px;
+      border: 1px solid #eee;
+      border-radius: 12px;
+      overflow: hidden;
+    }
+
+    .btn {
+      display: inline-block;
+      padding: 10px 14px;
+      border-radius: 10px;
+      border: 1px solid #ddd;
+      background: #fafafa;
+      cursor: pointer;
+      text-decoration: none;
+      color: #111;
+      margin-right: 10px;
+    }
+
+    .warn {
+      background: #fff5f5;
+      border-color: #ffd2d2;
+    }
   </style>
 </head>
+
 <body>
-
-  <h2>HIPAA Sign</h2>
-
   <div class="box">
-    <div><b>SID:</b> <span id="sid">(loading)</span></div>
-    <div><b>Status:</b> <span id="status">Init…</span></div>
+    <h2>HIPAA Sign</h2>
+    <div class="muted">Loading secure signing session…</div>
+
+    <div id="status" class="card"></div>
+
+    <div id="meta" class="card" style="display:none;">
+      <div class="title">SID</div>
+      <div id="sidBox"></div>
+    </div>
+
+    <div id="apiOut" class="card" style="display:none;">
+      <div class="title">API response</div>
+      <pre id="apiJson" style="margin:0;"></pre>
+    </div>
+
+    <div id="ua" class="card" style="display:none;">
+      <div class="title">Debug</div>
+      <div id="uaText"></div>
+    </div>
+
+    <div id="actions" style="display:none;">
+      <a id="openSafari" class="btn warn" href="#" target="_blank" rel="noopener">Open in Safari/Browser</a>
+      <button id="retryBtn" class="btn">Retry</button>
+    </div>
+
+    <!-- Embedded signer mounts here -->
+    <div id="embed"></div>
   </div>
 
-  <div class="box">
-    <div><b>API response:</b></div>
-    <pre id="api">(waiting)</pre>
-  </div>
+  <script>
+    const STATUS   = document.getElementById('status');
+    const META     = document.getElementById('meta');
+    const SIDBOX   = document.getElementById('sidBox');
+    const APIOUT   = document.getElementById('apiOut');
+    const APIJSON  = document.getElementById('apiJson');
+    const UACARD   = document.getElementById('ua');
+    const UATEXT   = document.getElementById('uaText');
+    const ACTIONS  = document.getElementById('actions');
+    const OPENBTN  = document.getElementById('openSafari');
+    const RETRYBTN = document.getElementById('retryBtn');
+    const EMBED    = document.getElementById('embed');
 
-  <div id="container"></div>
+    function setStatus(msg) {
+      STATUS.textContent = msg;
+      console.log('[SIGN]', msg);
+    }
 
-<script>
-  const API_BASE = "https://6cxl9xwo00.execute-api.eu-north-1.amazonaws.com";
+    function qp(name) {
+      const u = new URL(window.location.href);
+      return u.searchParams.get(name);
+    }
 
-  const sid = new URLSearchParams(window.location.search).get("sid");
-  document.getElementById("sid").textContent = sid || "(missing)";
+    function isWhatsAppWebView() {
+      const ua = navigator.userAgent || '';
+      return /WhatsApp/i.test(ua);
+    }
 
-  if (!sid) {
-    document.getElementById("status").textContent =
-      "Missing sid in URL. Example: /?sid=...";
-    document.getElementById("api").textContent =
-      "Open this page with ?sid=<signature_id>";
-  } else {
-    document.getElementById("status").textContent = "Fetching sign_url…";
+    // ✅ Put your API Gateway base here (NO trailing slash)
+    // Example: https://6cxl9xwo00.execute-api.eu-north-1.amazonaws.com
+    const API_BASE = 'https://6cxl9xwo00.execute-api.eu-north-1.amazonaws.com';
 
-    fetch(`${API_BASE}/api/sign_url?sid=${encodeURIComponent(sid)}`)
-      .then(r => r.json())
-      .then(data => {
-        document.getElementById("api").textContent = JSON.stringify(data, null, 2);
+    async function loadSignUrl(sid) {
+      const url = `${API_BASE}/api/sign_url?sid=${encodeURIComponent(sid)}`;
+      setStatus('Requesting sign_url…');
 
-        const signUrl = data.sign_url || (data.embedded && data.embedded.sign_url);
-        const clientId = data.client_id;
+      const resp = await fetch(url, { method: 'GET' });
 
-        if (!signUrl) {
-          document.getElementById("status").textContent = "No sign_url in API response";
-          return;
-        }
-        if (!clientId) {
-          document.getElementById("status").textContent = "No client_id in API response";
-          return;
-        }
+      let data = null;
+      try {
+        data = await resp.json();
+      } catch (e) {
+        data = { ok: false, error: 'non_json_response', status: resp.status };
+      }
 
-        document.getElementById("status").textContent = "Opening embedded signing…";
+      // Show debug
+      APIOUT.style.display = 'block';
+      APIJSON.textContent = JSON.stringify(data, null, 2);
 
-        const client = new HelloSign({ clientId });
+      if (!resp.ok) {
+        throw new Error(`HTTP_${resp.status}`);
+      }
+      if (!data || data.ok !== true) {
+        throw new Error(data && data.error ? data.error : 'api_error');
+      }
+      if (!data.sign_url || !data.client_id) {
+        throw new Error('missing_sign_url_or_client_id');
+      }
 
-        client.open(signUrl, {
-          container: document.getElementById("container"),
-          skipDomainVerification: true
-        });
+      return data;
+    }
 
-        client.on("error", (err) => {
-          document.getElementById("status").textContent = "HelloSign error (see console)";
-          console.error("HelloSign error:", err);
-        });
+    function openEmbedded(data) {
+      setStatus('Opening embedded signer…');
 
-        client.on("sign", () => {
-          document.getElementById("status").textContent = "Signed ✅";
-        });
+      // Clear previous embed
+      EMBED.innerHTML = '';
 
-        client.on("close", () => {
-          // not always fired depending on embedded flow
-          console.log("HelloSign closed");
-        });
-
-      })
-      .catch(err => {
-        document.getElementById("status").textContent = "Fetch failed (see console)";
-        document.getElementById("api").textContent = String(err);
-        console.error(err);
+      const client = new HelloSign({
+        clientId: data.client_id
       });
-  }
-</script>
 
+      // Important: mount into container + give height so Continue is visible
+      client.open(data.sign_url, {
+        container: EMBED,
+        skipDomainVerification: true,
+        allowCancel: true,
+        debug: true,
+        // Some SDK builds accept height; harmless if ignored
+        height: 900
+      });
+
+      client.on('ready', () => setStatus('Embedded loaded. Scroll inside signer if needed.'));
+      client.on('sign',  () => setStatus('Signed ✅ You can close this page.'));
+      client.on('cancel',() => setStatus('Signing cancelled.'));
+      client.on('error', (e) => {
+        setStatus('Embed error. Check console + API response block.');
+        console.error('HelloSign error:', e);
+      });
+    }
+
+    async function main() {
+      const sid = qp('sid');
+
+      // Debug cards
+      UACARD.style.display = 'block';
+      UATEXT.textContent = navigator.userAgent || '';
+
+      if (!sid) {
+        setStatus('Missing sid in URL');
+        return;
+      }
+
+      META.style.display = 'block';
+      SIDBOX.textContent = sid;
+
+      // WhatsApp webview hint
+      if (isWhatsAppWebView()) {
+        ACTIONS.style.display = 'block';
+        setStatus('Opened inside WhatsApp. If buttons like Continue are hidden, tap "Open in Safari/Browser".');
+
+        // open same URL but user chooses browser
+        OPENBTN.href = window.location.href;
+      }
+
+      try {
+        const data = await loadSignUrl(sid);
+
+        // If not in WhatsApp webview, still show actions (useful for testing)
+        ACTIONS.style.display = 'block';
+        OPENBTN.href = window.location.href;
+
+        openEmbedded(data);
+      } catch (e) {
+        ACTIONS.style.display = 'block';
+        setStatus('API did not return sign_url/client_id. Tap Retry, and check API response block.');
+        console.error(e);
+      }
+    }
+
+    RETRYBTN.addEventListener('click', () => {
+      // full reload is the cleanest for embedded SDK in mobile browsers
+      window.location.reload();
+    });
+
+    main().catch((e) => {
+      ACTIONS.style.display = 'block';
+      setStatus('Fatal error. Check console + API response block.');
+      console.error(e);
+    });
+  </script>
 </body>
 </html>
