@@ -1,45 +1,89 @@
 <!doctype html>
-<html lang="en">
+<html>
 <head>
-  <meta charset="utf-8"/>
-  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0"/>
-  <title>HippSign — Sign</title>
-  <script src="https://cdn.jsdelivr.net/npm/hellosign-embedded@2.12.3/umd/embedded.production.min.js"></script>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>HIPAA Sign</title>
+  <script src="https://cdn.hellosign.com/public/js/embedded/v2.11.1/embedded.development.js"></script>
+  <style>
+    body { font-family: Arial, sans-serif; padding: 20px; }
+    .box { max-width: 720px; margin: 0 auto; }
+    .muted { color: #666; }
+    #status { margin-top: 10px; }
+  </style>
 </head>
 <body>
-  <div id="status" style="font-family: Arial; padding: 16px;">Loading signing session…</div>
+  <div class="box">
+    <h2>Signing page</h2>
+    <div class="muted">Loading secure signing session…</div>
+    <div id="status"></div>
+  </div>
 
   <script>
-    const statusEl = document.getElementById('status');
-    const sid = new URLSearchParams(location.search).get('sid');
-    if (!sid) {
-      statusEl.textContent = "Missing sid";
-      throw new Error("missing sid");
+    const STATUS = document.getElementById('status');
+
+    function setStatus(msg) {
+      STATUS.textContent = msg;
+      console.log('[SIGN]', msg);
     }
 
-    // Call your API Gateway helper
-    const api = "https://6cxl9xwo00.execute-api.eu-north-1.amazonaws.com/api/sign_url?sid=" + encodeURIComponent(sid);
+    function qp(name) {
+      const u = new URL(window.location.href);
+      return u.searchParams.get(name);
+    }
 
-    fetch(api, { method: "GET" })
-      .then(r => r.json())
-      .then(j => {
-        if (!j.ok) throw new Error(j.error || "api_error");
+    async function main() {
+      const sid = qp('sid');
+      if (!sid) {
+        setStatus('Missing sid in URL');
+        return;
+      }
 
-        statusEl.textContent = "Opening signer…";
+      // ВАЖНО: поставь сюда твой API Gateway домен
+      const API_BASE = 'https://YOUR_API_GATEWAY_DOMAIN'; // <= замени
+      const url = `${API_BASE}/api/sign_url?sid=${encodeURIComponent(sid)}`;
 
-        const client = new window.HelloSign();
+      setStatus('Requesting sign_url…');
 
-        client.open(j.sign_url, {
-          clientId: j.client_id,
-          // In production keep domain restriction ON.
-          // For trial, if domain-mismatch issues appear, temporarily enable this:
-          // skipDomainVerification: true,
-          testMode: (j.test_mode === "1")
-        });
-      })
-      .catch(err => {
-        statusEl.textContent = "Failed to open signing: " + err.message;
+      const resp = await fetch(url, { method: 'GET' });
+      const data = await resp.json();
+
+      if (!data || !data.ok) {
+        setStatus('API error: ' + (data && data.error ? data.error : 'unknown'));
+        console.log('API response:', data);
+        return;
+      }
+
+      if (!data.sign_url || !data.client_id) {
+        setStatus('API response missing sign_url/client_id');
+        console.log('API response:', data);
+        return;
+      }
+
+      setStatus('Opening embedded signer…');
+
+      const client = new HelloSign({
+        clientId: data.client_id
       });
+
+      client.open(data.sign_url, {
+        skipDomainVerification: true,
+        allowCancel: true,
+        debug: true
+      });
+
+      client.on('sign', () => setStatus('Signed ✅ You can close this page.'));
+      client.on('cancel', () => setStatus('Signing cancelled.'));
+      client.on('error', (e) => {
+        setStatus('Embed error. Check console.');
+        console.error('HelloSign error:', e);
+      });
+    }
+
+    main().catch((e) => {
+      setStatus('Fatal error. Check console.');
+      console.error(e);
+    });
   </script>
 </body>
 </html>
