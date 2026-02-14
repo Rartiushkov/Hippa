@@ -1,87 +1,96 @@
 <!doctype html>
 <html lang="en">
 <head>
-  <meta charset="utf-8" />
+  <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
   <title>HIPAA Sign</title>
+  <script src="https://cdn.hellosign.com/public/js/embedded/v2.1.0/embedded.js"></script>
   <style>
-    body { font-family: system-ui, Arial; margin: 16px; }
+    body { font-family: Arial, sans-serif; margin: 16px; }
     .box { padding: 12px; border: 1px solid #ddd; border-radius: 10px; margin-bottom: 12px; }
-    pre { white-space: pre-wrap; word-break: break-word; }
-    #sign-container { width: 100%; height: 92vh; border: 1px solid #ddd; border-radius: 10px; overflow: hidden; }
+    #container { width: 100%; height: 85vh; border: 1px solid #eee; border-radius: 10px; overflow: hidden; }
+    code { background: #f6f6f6; padding: 2px 6px; border-radius: 6px; }
+    pre { background: #0b0b0b; color: #d9d9d9; padding: 10px; border-radius: 10px; overflow:auto; }
   </style>
 </head>
 <body>
+
   <h2>HIPAA Sign</h2>
 
-  <div class="box" id="status">Loading…</div>
-  <div class="box"><b>SID:</b> <span id="sid"></span></div>
-  <div class="box"><b>API response:</b><pre id="api"></pre></div>
+  <div class="box">
+    <div><b>SID:</b> <span id="sid">(loading)</span></div>
+    <div><b>Status:</b> <span id="status">Init…</span></div>
+  </div>
 
-  <div id="sign-container"></div>
+  <div class="box">
+    <div><b>API response:</b></div>
+    <pre id="api">(waiting)</pre>
+  </div>
 
-  <!-- Dropbox Sign Embedded -->
-  <script src="https://cdn.hellosign.com/public/js/embedded/v2.11.1/embedded.development.js"></script>
+  <div id="container"></div>
 
-  <script>
-    const elStatus = document.getElementById('status');
-    const elSid = document.getElementById('sid');
-    const elApi = document.getElementById('api');
+<script>
+  const API_BASE = "https://6cxl9xwo00.execute-api.eu-north-1.amazonaws.com";
 
-    function setStatus(msg) { elStatus.textContent = msg; }
+  const sid = new URLSearchParams(window.location.search).get("sid");
+  document.getElementById("sid").textContent = sid || "(missing)";
 
-    function getSid() {
-      const u = new URL(window.location.href);
-      return (u.searchParams.get('sid') || '').trim();
-    }
+  if (!sid) {
+    document.getElementById("status").textContent =
+      "Missing sid in URL. Example: /?sid=...";
+    document.getElementById("api").textContent =
+      "Open this page with ?sid=<signature_id>";
+  } else {
+    document.getElementById("status").textContent = "Fetching sign_url…";
 
-    async function main() {
-      const sid = getSid();
-      elSid.textContent = sid || '(missing)';
-      if (!sid) {
-        setStatus('Missing sid in URL. Example: /sign?sid=...');
-        return;
-      }
+    fetch(`${API_BASE}/api/sign_url?sid=${encodeURIComponent(sid)}`)
+      .then(r => r.json())
+      .then(data => {
+        document.getElementById("api").textContent = JSON.stringify(data, null, 2);
 
-      setStatus('Fetching sign_url…');
-      const apiUrl = `https://6cxl9xwo00.execute-api.eu-north-1.amazonaws.com/api/sign_url?sid=${encodeURIComponent(sid)}`;
+        const signUrl = data.sign_url || (data.embedded && data.embedded.sign_url);
+        const clientId = data.client_id;
 
-      let data;
-      try {
-        const res = await fetch(apiUrl, { method: 'GET' });
-        data = await res.json();
-      } catch (e) {
-        elApi.textContent = String(e);
-        setStatus('Failed to call API (network/CORS).');
-        return;
-      }
+        if (!signUrl) {
+          document.getElementById("status").textContent = "No sign_url in API response";
+          return;
+        }
+        if (!clientId) {
+          document.getElementById("status").textContent = "No client_id in API response";
+          return;
+        }
 
-      elApi.textContent = JSON.stringify(data, null, 2);
+        document.getElementById("status").textContent = "Opening embedded signing…";
 
-      if (!data || !data.ok || !data.sign_url || !data.client_id) {
-        setStatus('API did not return sign_url/client_id.');
-        return;
-      }
+        const client = new HelloSign({ clientId });
 
-      setStatus('Opening embedded signing…');
+        client.open(signUrl, {
+          container: document.getElementById("container"),
+          skipDomainVerification: true
+        });
 
-      const client = new window.HelloSign();
-      client.on('open', () => setStatus('Embedded opened.'));
-      client.on('sign', () => setStatus('Signed ✅ (you can close this tab).'));
-      client.on('close', () => setStatus('Closed.'));
-      client.on('error', (err) => {
-        setStatus('Embedded error: ' + (err && (err.message || err.toString())));
+        client.on("error", (err) => {
+          document.getElementById("status").textContent = "HelloSign error (see console)";
+          console.error("HelloSign error:", err);
+        });
+
+        client.on("sign", () => {
+          document.getElementById("status").textContent = "Signed ✅";
+        });
+
+        client.on("close", () => {
+          // not always fired depending on embedded flow
+          console.log("HelloSign closed");
+        });
+
+      })
+      .catch(err => {
+        document.getElementById("status").textContent = "Fetch failed (see console)";
+        document.getElementById("api").textContent = String(err);
+        console.error(err);
       });
+  }
+</script>
 
-      // IMPORTANT: allow skipping domain verification for test_mode only
-      client.open(data.sign_url, {
-        clientId: data.client_id,
-        container: document.getElementById('sign-container'),
-        skipDomainVerification: (data.test_mode === "1")
-      });
-    }
-
-    main();
-  </script>
 </body>
 </html>
